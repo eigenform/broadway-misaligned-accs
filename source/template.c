@@ -50,8 +50,10 @@ int main(int argc, char **argv) {
 	//
 	// The title metadata for NTSC-J WiiVC Ocarina of Time indicates that the
 	// supported IOS version is IOSv9. FYI: reloading directly into IOSv9 here 
-	// will cause HW_AHBPROT bits to be cleared.
+	// will cause HW_AHBPROT bits to be cleared. You'd need ARM code execution
+	// in IOSv9 in order to restore your original permissions.
 
+	printf("Running with IOSv%d.%d\n", IOS_GetVersion(), IOS_GetRevision());
 	printf("HW_AHBPROT    =%08x\n", *HW_AHBPROT);
 	printf("HW_VERSION    =%08x\n", *HW_VERSION);
 	printf("HW_CLOCKS     =%08x\n", *HW_CLOCKS);
@@ -63,6 +65,7 @@ int main(int argc, char **argv) {
 		printf("Couldn't load IOSv9, returned %d\n", res);
 		goto test_done;
 	}
+	printf("Reloaded into IOSv%d.%d\n", IOS_GetVersion(), IOS_GetRevision());
 
 	// In the WiiVC test case, the DBAT responsible for the uncached MEM1 
 	// region is marked as cache-inhibited and guarded.
