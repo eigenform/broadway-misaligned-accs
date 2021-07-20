@@ -29,11 +29,40 @@ void init(void)
 // Target for loads and stores
 static u32 test_buffer[0x100] __attribute__((aligned(1024)));
 
-static vu32* const HW_CLOCKS	= (vu32*)0xcd000190;
+static vu32* const HW_AHBPROT	= (vu32*)0xcd800064;
+static vu32* const HW_CLOCKS	= (vu32*)0xcd800190;
+static vu32* const HW_PLLSYS	= (vu32*)0xcd8001b0;
+static vu32* const HW_PLLSYSEXT	= (vu32*)0xcd8001b4;
+static vu32* const HW_VERSION	= (vu32*)0xcd800214;
 
+void __inline__ do_misaligned_store(u32 addr, u32 val)
+{ 
+	*(u32*)(addr) = val; 
+}
 
 int main(int argc, char **argv) {
 	init();
+
+	// The current IOS might affect the behavior in question (i.e. by setting
+	// up hardware in some different way than IOSv58 does). When booting 
+	// into The Homebrew Channel, all of the HW_AHBPROT bits should be set for 
+	// us (so we can read/write Hollywood registers). 
+	//
+	// The title metadata for NTSC-J WiiVC Ocarina of Time indicates that the
+	// supported IOS version is IOSv9. FYI: reloading directly into IOSv9 here 
+	// will cause HW_AHBPROT bits to be cleared.
+
+	printf("HW_AHBPROT    =%08x\n", *HW_AHBPROT);
+	printf("HW_VERSION    =%08x\n", *HW_VERSION);
+	printf("HW_CLOCKS     =%08x\n", *HW_CLOCKS);
+	printf("HW_PLLSYS     =%08x\n", *HW_PLLSYS);
+	printf("HW_PLLSYSEXT  =%08x\n", *HW_PLLSYSEXT);
+
+	int res = IOS_ReloadIOS(9);
+	if (res) {
+		printf("Couldn't load IOSv9, returned %d\n", res);
+		goto test_done;
+	}
 
 	// In the WiiVC test case, the DBAT responsible for the uncached MEM1 
 	// region is marked as cache-inhibited and guarded.
@@ -46,19 +75,18 @@ int main(int argc, char **argv) {
 		goto test_done;
 	}
 
-	printf("HW_CLOCKS=%08x\n", *HW_CLOCKS);
-
 	printf("HID0=%08x HID1=%08x HID2=%08x HID4=%08x\n", 
 		mfspr(HID0), mfspr(HID1), mfspr(HID2), mfspr(HID4));
 
-	// The state of HID{0,1,2} SPRs differs from the WiiVC test case.
-	// Booting into this application from The Homebrew Channel:
+	// The state of HID{0,1,2} SPRs differs from the WiiVC test case running
+	// on Dolphin, but they might not matter on the surface of things. Booting 
+	// into this application from The Homebrew Channel:
 	//
 	//		HID0 = 0x0011_c264
 	//		HID1 = 0x3000_0000
 	//		HID2 = 0xa000_0000
 	//
-	// And for the state in Dolphin with WiiVC 
+	// And for the state in Dolphin while doing the misaligned store:
 	//
 	//		HID0 = 0x0011_c664 (DCFI (bit 21) is set)
 	//		HID1 = 0x8000_0000 (has only PC0 (bit 0) set)
@@ -73,7 +101,7 @@ int main(int argc, char **argv) {
 	//		- WPE bit probably irrelevant here
 	//
 	// mtspr(HID0, 0x0011c664); // Setting 0x0000_0400 crashes us hard
-	// mtspr(HID1, 0x80000000);	// Uhhh?
+	// mtspr(HID1, 0x80000000);	// Uhhh aren't these supposed to be read-only?
 	// mtspr(HID2, 0xe0000000); // The write-gather pipe shouldn't matter here
 	// mtspr(HID4, 0x83900000); // HID4 bits should be identical
 
@@ -85,8 +113,7 @@ int main(int argc, char **argv) {
 	u32 addr_uc_mis	= addr_uc + 0x00000007;
 
 	// Crash here!
-	*(u32*)addr_uc_mis = 0xdeadbeef;
-	printf("Wrote 0xdeadbeef to address %08x\n", addr_mis);
+	//do_misaligned_store(addr_uc_mis, 0xdeadbeef);
 
 	printf("%08x: %08x\n", (u32)(addr_uc+0x00), *(u32*)(addr_uc+0x00));
 	printf("%08x: %08x\n", (u32)(addr_uc+0x04), *(u32*)(addr_uc+0x04));
