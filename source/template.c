@@ -29,6 +29,9 @@ void init(void)
 // Target for loads and stores
 static u32 test_buffer[0x100] __attribute__((aligned(1024)));
 
+static vu32* const HW_CLOCKS	= (vu32*)0xcd000190;
+
+
 int main(int argc, char **argv) {
 	init();
 
@@ -42,6 +45,11 @@ int main(int argc, char **argv) {
 		printf("DBAT1 %08x%08x\n", dbat1_u, dbat1_l);
 		goto test_done;
 	}
+
+	printf("HW_CLOCKS=%08x\n", *HW_CLOCKS);
+
+	printf("HID0=%08x HID1=%08x HID2=%08x HID4=%08x\n", 
+		mfspr(HID0), mfspr(HID1), mfspr(HID2), mfspr(HID4));
 
 	// The state of HID{0,1,2} SPRs differs from the WiiVC test case.
 	// Booting into this application from The Homebrew Channel:
@@ -64,22 +72,10 @@ int main(int argc, char **argv) {
 	//		- Why is the HID1 configuration different (clocking related?)
 	//		- WPE bit probably irrelevant here
 	//
-
 	// mtspr(HID0, 0x0011c664); // Setting 0x0000_0400 crashes us hard
-	// mtspr(HID1, 0x80000000); // HID1 bits are read-only
+	// mtspr(HID1, 0x80000000);	// Uhhh?
 	// mtspr(HID2, 0xe0000000); // The write-gather pipe shouldn't matter here
 	// mtspr(HID4, 0x83900000); // HID4 bits should be identical
-	// u32 hid0 = mfspr(HID0);
-	// u32 hid1 = mfspr(HID1);
-	// u32 hid2 = mfspr(HID2);
-	// u32 hid4 = mfspr(HID4);
-	// if ((hid0 != 0x0011c664) || (hid1 != 0x80000000) || 
-	// 	(hid2 != 0xe0000000) || (hid4 != 0x83900000)) {
-	// 	printf("HIDn register[s] aren't correct for this test\n");
-	// 	printf("HID0=%08x HID1=%08x HID2=%08x HID4=%08x\n", 
-	// 			hid0, hid1, hid2, hid4);
-	// 	goto test_done;
-	// }
 
 	u32 addr		= (u32)&test_buffer[0];
 	u32 addr_phys	= addr & 0x017fffff;
@@ -88,8 +84,9 @@ int main(int argc, char **argv) {
 	u32 addr_mis	= addr + 0x00000007;
 	u32 addr_uc_mis	= addr_uc + 0x00000007;
 
-	//*(u32*)addr_uc_mis = 0xdeadbeef;
-	//printf("Wrote 0xdeadbeef to address %08x\n", addr_mis);
+	// Crash here!
+	*(u32*)addr_uc_mis = 0xdeadbeef;
+	printf("Wrote 0xdeadbeef to address %08x\n", addr_mis);
 
 	printf("%08x: %08x\n", (u32)(addr_uc+0x00), *(u32*)(addr_uc+0x00));
 	printf("%08x: %08x\n", (u32)(addr_uc+0x04), *(u32*)(addr_uc+0x04));
