@@ -43,31 +43,43 @@ int main(int argc, char **argv) {
 		goto test_done;
 	}
 
-	// The state of HID SPRs differs from the WiiVC test case, in which:
+	// The state of HID{0,1,2} SPRs differs from the WiiVC test case.
+	// Booting into this application from The Homebrew Channel:
 	//
-	//		HID0 has DCFI (bit 21) set
-	//		HID1 has only PC0 (bit 0) set
-	//		HID2 has WPE (bit 1) set
+	//		HID0 = 0x0011_c264
+	//		HID1 = 0x3000_0000
+	//		HID2 = 0xa000_0000
 	//
-	//	Changing these causes my Wii to crash spectacularly.
+	// And for the state in Dolphin with WiiVC 
+	//
+	//		HID0 = 0x0011_c664 (DCFI (bit 21) is set)
+	//		HID1 = 0x8000_0000 (has only PC0 (bit 0) set)
+	//		HID2 = 0xe000_0000 (has WPE (bit 1) set)
+	//
+	//	Setting 0x0000_0400 in HID0 causes my Wii to crash spectacularly here
+	//	(I guess because it invalidates the entire dcache?). Questions/notes:
+	//
+	//		- DCFI being set is probably just an artifact of Dolphin not 
+	//		  handling it (which is probably fine anyway)
+	//		- Why is the HID1 configuration different (clocking related?)
+	//		- WPE bit probably irrelevant here
+	//
 
-	mtspr(HID0, 0x0011c664);
-	mtspr(HID1, 0x80000000);
-	mtspr(HID2, 0xe0000000);
+	// mtspr(HID0, 0x0011c664); // Setting 0x0000_0400 crashes us hard
+	// mtspr(HID1, 0x80000000); // HID1 bits are read-only
+	// mtspr(HID2, 0xe0000000); // The write-gather pipe shouldn't matter here
 	// mtspr(HID4, 0x83900000); // HID4 bits should be identical
-
-	u32 hid0 = mfspr(HID0);
-	u32 hid1 = mfspr(HID1);
-	u32 hid2 = mfspr(HID2);
-	u32 hid4 = mfspr(HID4);
-
-	if ((hid0 != 0x0011c664) || (hid1 != 0x80000000) || 
-		(hid2 != 0xe0000000) || (hid4 != 0x83900000)) {
-		printf("HIDn register[s] aren't correct for this test\n");
-		printf("HID0=%08x HID1=%08x HID2=%08x HID4=%08x\n", 
-				hid0, hid1, hid2, hid4);
-		goto test_done;
-	}
+	// u32 hid0 = mfspr(HID0);
+	// u32 hid1 = mfspr(HID1);
+	// u32 hid2 = mfspr(HID2);
+	// u32 hid4 = mfspr(HID4);
+	// if ((hid0 != 0x0011c664) || (hid1 != 0x80000000) || 
+	// 	(hid2 != 0xe0000000) || (hid4 != 0x83900000)) {
+	// 	printf("HIDn register[s] aren't correct for this test\n");
+	// 	printf("HID0=%08x HID1=%08x HID2=%08x HID4=%08x\n", 
+	// 			hid0, hid1, hid2, hid4);
+	// 	goto test_done;
+	// }
 
 	u32 addr		= (u32)&test_buffer[0];
 	u32 addr_phys	= addr & 0x017fffff;
