@@ -44,9 +44,17 @@ int main(int argc, char **argv) {
 	}
 
 	// The state of HID SPRs differs from the WiiVC test case, in which:
+	//
 	//		HID0 has DCFI (bit 21) set
 	//		HID1 has only PC0 (bit 0) set
 	//		HID2 has WPE (bit 1) set
+	//
+	//	Changing these causes my Wii to crash spectacularly.
+
+	mtspr(HID0, 0x0011c664);
+	mtspr(HID1, 0x80000000);
+	mtspr(HID2, 0xe0000000);
+	// mtspr(HID4, 0x83900000); // HID4 bits should be identical
 
 	u32 hid0 = mfspr(HID0);
 	u32 hid1 = mfspr(HID1);
@@ -66,10 +74,10 @@ int main(int argc, char **argv) {
 	u32 addr_uc		= addr_phys | 0xc0000000;
 
 	u32 addr_mis	= addr + 0x00000007;
-	u32 addr_uc_mis	= addr_uc + 0x00000006;
+	u32 addr_uc_mis	= addr_uc + 0x00000007;
 
-	*(u32*)addr_uc_mis = 0xdeadbeef;
-	printf("Wrote 0xdeadbeef to address %08x\n", addr_mis);
+	//*(u32*)addr_uc_mis = 0xdeadbeef;
+	//printf("Wrote 0xdeadbeef to address %08x\n", addr_mis);
 
 	printf("%08x: %08x\n", (u32)(addr_uc+0x00), *(u32*)(addr_uc+0x00));
 	printf("%08x: %08x\n", (u32)(addr_uc+0x04), *(u32*)(addr_uc+0x04));
