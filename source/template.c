@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <gccore.h>
 #include <wiiuse/wpad.h>
 
@@ -8,7 +9,10 @@
 static void *xfb = NULL;
 static GXRModeObj *rmode = NULL;
 
-static u32 test_buffer[0x100] __attribute__((aligned(1024)));
+static u32 *buffer_uc = NULL;
+static u32 buffer[4] __attribute__((aligned(1024))) = {
+	0x11111111, 0x11111111, 0x11111111, 0x11111111
+};
 
 static vu32* const HW_AHBPROT	= (vu32*)0xcd800064;
 static vu32* const HW_CLOCKS	= (vu32*)0xcd800190;
@@ -16,8 +20,7 @@ static vu32* const HW_PLLSYS	= (vu32*)0xcd8001b0;
 static vu32* const HW_PLLSYSEXT	= (vu32*)0xcd8001b4;
 static vu32* const HW_VERSION	= (vu32*)0xcd800214;
 
-
-void init(void)
+void init_video(void)
 {
 	VIDEO_Init();
 	PAD_Init();
@@ -68,21 +71,6 @@ void __attribute__((noinline)) do_misaligned_store16(u32 addr, u16 val)
 	);
 }
 
-// Try setting the decrementer and expecting an exception while we're hanging
-// after performing some misaligned 32-bit store.
-void test_dec_exception_store32(u32 addr, u32 value)
-{
-	if ((mfmsr() & 0x00008000) == 0) {
-		mtmsr(mfmsr() | 0x8000);
-		printf("Enabled external interrupts\n");
-	}
-	__asm__ __volatile__(
-		"mtdec %0\n" 
-		: : "r" (0x00000010)
-	);
-	do_misaligned_store32(addr, value);
-}
-
 // The state of HID{0,1,2} SPRs differs from the WiiVC test case running
 // on Dolphin, but they might not matter on the surface of things. Booting 
 // into this application from The Homebrew Channel:
@@ -118,12 +106,16 @@ int check_sprs(void)
 	if ((dbat1_u != 0xc0001fff) || (dbat1_l != 0x0000002a)) {
 		printf("DBAT1 isn't correct for this test?\n");
 		printf("DBAT1 %08x%08x\n", dbat1_u, dbat1_l);
-		return 1;
+		return -1;
 	}
+
+	mtspr(HID0, mfspr(HID0) | 0x80000000);
 
 	printf("HID0=%08x HID1=%08x HID2=%08x HID4=%08x\n", 
 		mfspr(HID0), mfspr(HID1), mfspr(HID2), mfspr(HID4));
 
+	mtmsr(mfmsr() & ~0x00001000);
+	_sync();
 	printf("MSR=%08x\n", mfmsr());
 
 	// mtspr(HID0, 0x0011c664); // Setting 0x0000_0400 crashes us hard
@@ -146,7 +138,6 @@ int check_sprs(void)
 
 int check_ios(void)
 {
-
 	printf("Running with IOSv%d.%d\n", IOS_GetVersion(), IOS_GetRevision());
 	printf("HW_AHBPROT    =%08x\n", *HW_AHBPROT);
 	printf("HW_VERSION    =%08x\n", *HW_VERSION);
@@ -157,51 +148,76 @@ int check_ios(void)
 	//int res = IOS_ReloadIOS(9);
 	//if (res) {
 	//	printf("Couldn't load IOSv9, returned %d\n", res);
-	//	goto test_done;
+	//	return -1;
 	//}
 	//printf("Reloaded into IOSv%d.%d\n", IOS_GetVersion(), IOS_GetRevision());
 	return 0;
 }
 
+void print_buffer_uc(void) 
+{
+	printf("%08x: %08x %08x %08x %08x\n", (u32)buffer_uc, 
+			buffer_uc[0], buffer_uc[1], buffer_uc[2], buffer_uc[3]);
+}
+void reset_buffer_uc(void) 
+{
+	buffer_uc[0] = 0x00000000;
+	buffer_uc[1] = 0x00000000;
+	buffer_uc[2] = 0x00000000;
+	buffer_uc[3] = 0x00000000;
+}
+
+void __attribute__((noinline)) do_test_crash() {
+	// This should crash
+	printf("32-bit store to %p\n", (u8*)buffer_uc + 5);
+	//reset_buffer_uc();
+	*(u32*)((u8*)buffer_uc + 5) = 0x88888888;
+	print_buffer_uc();
+}
+
+void __attribute__((noinline)) do_test_ok() {
+	printf("32-bit store to %p\n", (u8*)buffer_uc + 5);
+	reset_buffer_uc();
+	*(u32*)((u8*)buffer_uc + 5) = 0x88888888;
+	print_buffer_uc();
+}
+
+
+
+// Notes:
+//
+// Broadway always seems to hang here, regardless of how the misaligned
+// store is split on 32-bit boundaries (and the behavior is the same for
+// all flavors of misaligned 16-bit stores too):
+//
+//		A[29-31] == 0b000 - OK (this is an aligned access)
+// 		A[29-31] == 0b001 - NG (broadway hangs)
+// 		A[29-31] == 0b010 - NG (broadway hangs)
+// 		A[29-31] == 0b011 - NG (broadway hangs)
+// 		A[29-31] == 0b100 - OK (this is an aligned access)
+// 		A[29-31] == 0b101 - NG (broadway hangs)
+// 		A[29-31] == 0b110 - NG (broadway hangs)
+// 		A[29-31] == 0b111 - NG (broadway hangs)
+//
+// Serializing instructions before this store don't seem to affect the 
+// outcome (we still hang), so I guess that totally rules out reordering.
+//
+// Why do I not get an exception and stack trace from libogc here?
+
 int main(int argc, char **argv) {
-	init();
+	init_video();
+	//init_exceptions();
 
-	if (!check_ios()) goto test_done;
-	if (!check_sprs()) goto test_done;
+	if (check_ios() != 0) 
+		goto test_done;
+	if (check_sprs() != 0) 
+		goto test_done;
 
-	u32 addr		= (u32)&test_buffer[0];
-	u32 addr_phys	= addr & 0x017fffff;
-	u32 addr_uc		= addr_phys | 0xc0000000;
+	buffer_uc  = (u32*)( ((u32)buffer & 0x017fffff) | 0xc0000000);
 
-	// Notes:
-	//
-	// Broadway always seems to hang here, regardless of how the misaligned
-	// store is split on 32-bit boundaries (and the behavior is the same for
-	// all flavors of misaligned 16-bit stores too):
-	//
-	//		A[29-31] == 0b000 - OK (this is an aligned access)
-	// 		A[29-31] == 0b001 - NG (broadway hangs)
-	// 		A[29-31] == 0b010 - NG (broadway hangs)
-	// 		A[29-31] == 0b011 - NG (broadway hangs)
-	// 		A[29-31] == 0b100 - OK (this is an aligned access)
-	// 		A[29-31] == 0b101 - NG (broadway hangs)
-	// 		A[29-31] == 0b110 - NG (broadway hangs)
-	// 		A[29-31] == 0b111 - NG (broadway hangs)
-	//
-	// Serializing instructions before this store don't seem to affect the 
-	// outcome (we still hang), so I guess that totally rules out reordering.
-	//
-	// Why do I not get an exception and stack trace from libogc here?
+	//do_test_ok();
+	do_test_crash();
 
-	// WARNING: This will cause Broadway to hang indefinitely.
-	do_misaligned_store32(addr_uc+1, 0xdeadbeef);
-	//do_misaligned_store16(addr_uc, 0xdead);
-
-	printf("%08x: %08x\n", (u32)(addr_uc+0x00), *(u32*)(addr_uc+0x00));
-	printf("%08x: %08x\n", (u32)(addr_uc+0x04), *(u32*)(addr_uc+0x04));
-	printf("%08x: %08x\n", (u32)(addr_uc+0x08), *(u32*)(addr_uc+0x08));
-	printf("%08x: %08x\n", (u32)(addr_uc+0x0c), *(u32*)(addr_uc+0x0c));
-	printf("%08x: %08x\n", (u32)(addr_uc+0x10), *(u32*)(addr_uc+0x10));
 
 test_done:
 	printf("\n");
